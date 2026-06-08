@@ -1,0 +1,39 @@
+name: Gold Price Alert
+
+on:
+  schedule:
+    # 11:30 PM IST = 18:00 UTC
+    - cron: '0 18 * * *'
+  workflow_dispatch:  # lets you run manually to test
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Run gold tracker
+        env:
+          GMAIL_USER:         ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          TO_EMAIL:           ${{ secrets.TO_EMAIL }}
+          WA_PHONE:           ${{ secrets.WA_PHONE }}
+          WA_APIKEY:          ${{ secrets.WA_APIKEY }}
+        run: python gold_tracker.py
+
+      - name: Save price for tomorrow
+        run: |
+          git config user.email "bot@github.com"
+          git config user.name "Gold Bot"
+          git add last_price.txt
+          git diff --staged --quiet || git commit -m "Update price $(date)" && git push
