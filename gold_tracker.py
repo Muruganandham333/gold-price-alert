@@ -46,11 +46,15 @@ def send_email(subject, body):
         s.send_message(msg)
 
 def send_whatsapp(message):
-    url = (
-        f"https://api.callmebot.com/whatsapp.php"
-        f"?phone={WA_PHONE}&text={requests.utils.quote(message)}&apikey={WA_APIKEY}"
-    )
-    requests.get(url)
+    try:
+        url = (
+            f"https://api.callmebot.com/whatsapp.php"
+            f"?phone={WA_PHONE}&text={requests.utils.quote(message)}&apikey={WA_APIKEY}"
+        )
+        requests.get(url, timeout=10)
+        print("WhatsApp sent ✅")
+    except Exception as e:
+        print(f"WhatsApp skipped ⚠️ — {e}")
 
 def main():
     if datetime.today().weekday() in (5, 6):
