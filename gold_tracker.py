@@ -13,7 +13,7 @@ WA_APIKEY   = os.environ['WA_APIKEY']
 TROY_OZ_TO_GRAM = 31.1035
 
 def get_gold_price_inr():
-    r = requests.get('https://api.gold-api.com/price/XAU?currency=INR', timeout=15)
+    r = requests.get('https://api.gold-api.com/price/XAU/INR', timeout=15)
     r.raise_for_status()
     data = r.json()
     price_per_oz_inr  = float(data['price'])
