@@ -9,32 +9,58 @@ GMAIL_PASS  = os.environ['GMAIL_APP_PASSWORD']
 TO_EMAIL    = os.environ['TO_EMAIL']
 WA_PHONE    = os.environ['WA_PHONE']
 WA_APIKEY   = os.environ['WA_APIKEY']
+ENABLE_WHATSAPP = False  # set True once Callmebot is ready
 
 TROY_OZ_TO_GRAM = 31.1035
 
-def get_gold_price_inr():
-    r = requests.get('https://api.gold-api.com/price/XAU/INR', timeout=15)
+def get_price(symbol):
+    r = requests.get(f'https://api.gold-api.com/price/{symbol}/INR', timeout=15)
     r.raise_for_status()
     data = r.json()
-    price_per_oz_inr  = float(data['price'])
-    price_per_gram    = round(price_per_oz_inr / TROY_OZ_TO_GRAM, 2)
-    price_per_10gram  = round(price_per_gram * 10, 2)
+    price_per_oz = float(data['price'])
     return {
-        'per_oz':    price_per_oz_inr,
-        'per_gram':  price_per_gram,
-        'per_10gram': price_per_10gram,
+        'per_oz':       round(price_per_oz, 2),
+        'per_gram_24k': round(price_per_oz / TROY_OZ_TO_GRAM, 2),
+        'per_gram_22k': round((price_per_oz / TROY_OZ_TO_GRAM) * 0.9167, 2),
+        'per_10g_24k':  round((price_per_oz / TROY_OZ_TO_GRAM) * 10, 2),
+        'per_10g_22k':  round((price_per_oz / TROY_OZ_TO_GRAM) * 0.9167 * 10, 2),
     }
 
-def read_last_price():
+def read_last_price(filename):
     try:
-        with open('last_price.txt', 'r') as f:
+        with open(filename, 'r') as f:
             return float(f.read().strip())
     except:
         return None
 
-def save_price(price):
-    with open('last_price.txt', 'w') as f:
+def save_price(filename, price):
+    with open(filename, 'w') as f:
         f.write(str(price))
+
+def price_summary(label, today, last):
+    if last:
+        change    = today['per_gram_24k'] - last
+        pct       = (change / last) * 100
+        direction = "INCREASED ▲" if change > 0 else "DECREASED ▼" if change < 0 else "UNCHANGED ▬"
+        tomorrow  = "may go UP 📈" if change > 0 else "may go DOWN 📉" if change < 0 else "may stay STABLE ➡️"
+        change_line = f"Change   : {'+' if change > 0 else ''}₹{change:.2f} ({pct:+.2f}%) — {direction}"
+        tomorrow_line = f"Tomorrow's {label} rate {tomorrow}"
+    else:
+        change_line   = "Change   : First run — no previous data"
+        tomorrow_line = ""
+
+    return (
+        f"{'='*35}\n"
+        f"🪙 {label}\n"
+        f"{'='*35}\n"
+        f"24K per gram : ₹{today['per_gram_24k']:,.2f}\n"
+        f"22K per gram : ₹{today['per_gram_22k']:,.2f}\n"
+        f"24K per 10g  : ₹{today['per_10g_24k']:,.2f}\n"
+        f"22K per 10g  : ₹{today['per_10g_22k']:,.2f}\n"
+        f"Per oz       : ₹{today['per_oz']:,.2f}\n\n"
+        f"{change_line}\n"
+        f"{tomorrow_line}\n"
+    )
 
 def send_email(subject, body):
     msg = MIMEText(body)
@@ -58,38 +84,37 @@ def send_whatsapp(message):
 
 def main():
     if datetime.today().weekday() in (5, 6):
-        print("Weekend — gold market closed. Skipping.")
+        print("Weekend — market closed. Skipping.")
         return
 
-    today = get_gold_price_inr()
-    last  = read_last_price()
-    now   = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    now = datetime.now().strftime("%d %b %Y, %I:%M %p")
 
-    if last:
-        change    = today['per_gram'] - last
-        pct       = (change / last) * 100
-        direction = "INCREASED ▲" if change > 0 else "DECREASED ▼" if change < 0 else "UNCHANGED ▬"
-        tomorrow  = "may go UP 📈" if change > 0 else "may go DOWN 📉" if change < 0 else "may stay STABLE ➡️"
+    # Fetch gold and silver
+    gold   = get_price('XAU')
+    silver = get_price('XAG')
 
-        msg = (
-            f"🪙 Gold Price Alert — {now}\n\n"
-            f"Per  1g  : ₹{today['per_gram']:,.2f}\n"
-            f"Per 10g  : ₹{today['per_10gram']:,.2f}\n"
-            f"Per 1 oz : ₹{today['per_oz']:,.2f}\n\n"
-            f"Change   : {'+' if change > 0 else ''}₹{change:.2f} ({pct:+.2f}%) — {direction}\n\n"
-            f"Tomorrow's gold rate {tomorrow}"
-        )
-    else:
-        msg = (
-            f"🪙 Gold tracker started! — {now}\n\n"
-            f"Per  1g  : ₹{today['per_gram']:,.2f}\n"
-            f"Per 10g  : ₹{today['per_10gram']:,.2f}\n"
-            f"Per 1 oz : ₹{today['per_oz']:,.2f}"
-        )
+    # Read yesterday's prices
+    last_gold   = read_last_price('last_gold.txt')
+    last_silver = read_last_price('last_silver.txt')
+
+    # Build message
+    gold_summary   = price_summary('GOLD',   gold,   last_gold)
+    silver_summary = price_summary('SILVER', silver, last_silver)
+
+    msg = (
+        f"📊 Metal Price Alert — {now}\n\n"
+        f"{gold_summary}\n"
+        f"{silver_summary}"
+    )
 
     print(msg)
-    send_email(f"Gold Alert — {now}", msg)
-    send_whatsapp(msg)
-    save_price(today['per_gram'])
+    send_email(f"Metal Alert — {now}", msg)
+
+    if ENABLE_WHATSAPP:
+        send_whatsapp(msg)
+
+    # Save today's prices
+    save_price('last_gold.txt',   gold['per_gram_24k'])
+    save_price('last_silver.txt', silver['per_gram_24k'])
 
 main()
