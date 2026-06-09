@@ -1,4 +1,5 @@
 import requests
+from bs4 import BeautifulSoup
 import smtplib
 from email.mime.text import MIMEText
 import os
@@ -9,38 +10,34 @@ GMAIL_PASS  = os.environ['GMAIL_APP_PASSWORD']
 TO_EMAIL    = os.environ['TO_EMAIL']
 WA_PHONE    = os.environ['WA_PHONE']
 WA_APIKEY   = os.environ['WA_APIKEY']
-ENABLE_WHATSAPP = False  # set True once Callmebot is ready
+ENABLE_WHATSAPP = False
 
-TROY_OZ_TO_GRAM = 31.1035
-
-def get_gold(symbol='XAU'):
-    r = requests.get(f'https://api.gold-api.com/price/{symbol}/INR', timeout=15)
+def get_ibja_rates():
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    r = requests.get('https://ibjarates.com/', headers=headers, timeout=15)
     r.raise_for_status()
-    price_per_oz = float(r.json()['price'])
-    per_gram     = price_per_oz / TROY_OZ_TO_GRAM
-    return {
-        'per_oz':       round(price_per_oz, 2),
-        'per_gram_24k': round(per_gram, 2),
-        'per_gram_22k': round(per_gram * 0.9167, 2),
-        'per_gram_18k': round(per_gram * 0.7500, 2),
-        'per_10g_24k':  round(per_gram * 10, 2),
-        'per_10g_22k':  round(per_gram * 0.9167 * 10, 2),
-        'per_10g_18k':  round(per_gram * 0.7500 * 10, 2),
-    }
+    soup = BeautifulSoup(r.text, 'html.parser')
 
-def get_silver(symbol='XAG'):
-    r = requests.get(f'https://api.gold-api.com/price/{symbol}/INR', timeout=15)
-    r.raise_for_status()
-    price_per_oz = float(r.json()['price'])
-    per_gram     = price_per_oz / TROY_OZ_TO_GRAM
+    rates = {}
+    rows = soup.find_all('tr')
+    for row in rows:
+        cols = row.find_all('td')
+        if len(cols) >= 2:
+            label = cols[0].get_text(strip=True)
+            value = cols[1].get_text(strip=True).replace(',', '')
+            try:
+                rates[label] = float(value)
+            except:
+                pass
+
     return {
-        'per_oz':        round(price_per_oz, 2),
-        'per_gram_999':  round(per_gram, 2),               # Fine silver
-        'per_gram_925':  round(per_gram * 0.925, 2),       # Sterling silver
-        'per_gram_800':  round(per_gram * 0.800, 2),       # German silver
-        'per_10g_999':   round(per_gram * 10, 2),
-        'per_10g_925':   round(per_gram * 0.925 * 10, 2),
-        'per_10g_800':   round(per_gram * 0.800 * 10, 2),
+        'gold_24k_10g':  rates.get('Gold 999', 0),   # per 10g
+        'gold_22k_10g':  rates.get('Gold 916', 0),   # per 10g
+        'gold_18k_10g':  rates.get('Gold 750', 0),   # per 10g
+        'silver_10g':    rates.get('Silver 999', 0), # per 10g (but in /kg on site)
+        'gold_24k_1g':   round(rates.get('Gold 999', 0) / 10, 2),
+        'gold_22k_1g':   round(rates.get('Gold 916', 0) / 10, 2),
+        'gold_18k_1g':   round(rates.get('Gold 750', 0) / 10, 2),
     }
 
 def read_last_price(filename):
@@ -54,18 +51,17 @@ def save_price(filename, price):
     with open(filename, 'w') as f:
         f.write(str(price))
 
-def change_summary(today_price, last_price, label):
-    if last_price:
-        change    = today_price - last_price
-        pct       = (change / last_price) * 100
-        direction = "INCREASED ▲" if change > 0 else "DECREASED ▼" if change < 0 else "UNCHANGED ▬"
-        tomorrow  = "may go UP 📈" if change > 0 else "may go DOWN 📉" if change < 0 else "may stay STABLE ➡️"
-        return (
-            f"Change   : {'+' if change > 0 else ''}₹{change:.2f} "
-            f"({pct:+.2f}%) — {direction}\n"
-            f"Tomorrow's {label} rate {tomorrow}"
-        )
-    return "Change   : First run — no previous data"
+def change_line(today, last, label):
+    if not last:
+        return "First run — no previous data"
+    change    = today - last
+    pct       = (change / last) * 100
+    direction = "INCREASED ▲" if change > 0 else "DECREASED ▼" if change < 0 else "UNCHANGED ▬"
+    tomorrow  = "may go UP 📈" if change > 0 else "may go DOWN 📉" if change < 0 else "may stay STABLE ➡️"
+    return (
+        f"Change : {'+' if change > 0 else ''}₹{change:.2f} ({pct:+.2f}%) — {direction}\n"
+        f"Tomorrow's {label} rate {tomorrow}"
+    )
 
 def send_email(subject, body):
     msg = MIMEText(body, 'plain', 'utf-8')
@@ -89,58 +85,49 @@ def send_whatsapp(message):
 
 def main():
     if datetime.today().weekday() in (5, 6):
-        print("Weekend — market closed. Skipping.")
+        print("Weekend — IBJA closed. Skipping.")
         return
 
-    now = datetime.now().strftime("%d %b %Y, %I:%M %p")
-
-    gold   = get_gold()
-    silver = get_silver()
+    now   = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    rates = get_ibja_rates()
 
     last_gold   = read_last_price('last_gold.txt')
     last_silver = read_last_price('last_silver.txt')
 
-    gold_change   = change_summary(gold['per_gram_24k'],   last_gold,   'Gold')
-    silver_change = change_summary(silver['per_gram_999'], last_silver, 'Silver')
+    gold_chg   = change_line(rates['gold_22k_1g'], last_gold,   'Gold')
+    silver_chg = change_line(rates['silver_10g'],  last_silver, 'Silver')
 
-    msg = f"""📊 Metal Price Alert — {now}
+    msg = f"""📊 IBJA Metal Rates — {now}
+(Source: India Bullion & Jewellers Association)
 
-{'='*38}
-🥇 GOLD (per gram)
-{'='*38}
-24K (Pure)    : ₹{gold['per_gram_24k']:>10,.2f}
-22K (Jewellery): ₹{gold['per_gram_22k']:>10,.2f}
-18K (Mixed)   : ₹{gold['per_gram_18k']:>10,.2f}
+{'='*40}
+🥇 GOLD
+{'='*40}
+24K (999) per 1g  : ₹{rates['gold_24k_1g']:>10,.2f}
+22K (916) per 1g  : ₹{rates['gold_22k_1g']:>10,.2f}  ← Jewellery
+18K (750) per 1g  : ₹{rates['gold_18k_1g']:>10,.2f}
 
-24K per 10g   : ₹{gold['per_10g_24k']:>10,.2f}
-22K per 10g   : ₹{gold['per_10g_22k']:>10,.2f}
-18K per 10g   : ₹{gold['per_10g_18k']:>10,.2f}
+24K per 10g       : ₹{rates['gold_24k_10g']:>10,.2f}
+22K per 10g       : ₹{rates['gold_22k_10g']:>10,.2f}  ← Jewellery
+18K per 10g       : ₹{rates['gold_18k_10g']:>10,.2f}
 
-Per oz        : ₹{gold['per_oz']:>10,.2f}
-{gold_change}
+{gold_chg}
 
-{'='*38}
-🥈 SILVER (per gram)
-{'='*38}
-999 Fine      : ₹{silver['per_gram_999']:>10,.2f}
-925 Sterling  : ₹{silver['per_gram_925']:>10,.2f}
-800 German    : ₹{silver['per_gram_800']:>10,.2f}
+{'='*40}
+🥈 SILVER
+{'='*40}
+999 per 10g       : ₹{rates['silver_10g']:>10,.2f}
 
-999 per 10g   : ₹{silver['per_10g_999']:>10,.2f}
-925 per 10g   : ₹{silver['per_10g_925']:>10,.2f}
-800 per 10g   : ₹{silver['per_10g_800']:>10,.2f}
-
-Per oz        : ₹{silver['per_oz']:>10,.2f}
-{silver_change}
+{silver_chg}
 """
 
     print(msg)
-    send_email(f"Metal Alert — {now}", msg)
+    send_email(f"IBJA Metal Alert — {now}", msg)
 
     if ENABLE_WHATSAPP:
         send_whatsapp(msg)
 
-    save_price('last_gold.txt',   gold['per_gram_24k'])
-    save_price('last_silver.txt', silver['per_gram_999'])
+    save_price('last_gold.txt',   rates['gold_22k_1g'])
+    save_price('last_silver.txt', rates['silver_10g'])
 
 main()
