@@ -22,8 +22,15 @@ def get_comex_gold_data():
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.goto("https://comexlive.org/", timeout=60000)
+
+        # Wait until the table with COMEX Gold appears
+        page.wait_for_selector("table tr", timeout=60000)
+
         html = page.content()
         browser.close()
+
+    # Debug: print first 500 chars of HTML to see what was fetched
+    print("DEBUG HTML:", html[:500])
 
     soup = BeautifulSoup(html, "html.parser")
     rows = soup.find_all("tr")
@@ -46,11 +53,7 @@ def get_comex_gold_data():
 # ==========================================
 
 def analyze_market(change_percent):
-    pct = float(
-        change_percent
-        .replace("%", "")
-        .replace("+", "")
-    )
+    pct = float(change_percent.replace("%", "").replace("+", ""))
 
     if pct <= -1.5:
         sentiment = "🔴 Strong Bearish"
