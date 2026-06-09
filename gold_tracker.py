@@ -132,38 +132,33 @@
 
 # main()
 
-
 import requests
 from bs4 import BeautifulSoup
 import smtplib
 from email.mime.text import MIMEText
 import os
-import json
 from datetime import datetime
 
-# =========================================
+# ==========================================
 # ENV VARIABLES
-# =========================================
+# ==========================================
 
 GMAIL_USER = os.environ['GMAIL_USER']
 GMAIL_PASS = os.environ['GMAIL_APP_PASSWORD']
 TO_EMAIL = os.environ['TO_EMAIL']
-GOLD_API_KEY = os.environ['GOLD_API_KEY']
 
-HISTORY_FILE = "gold_history.json"
+# ==========================================
+# FETCH COMEX DATA
+# ==========================================
 
-# =========================================
-# FETCH IBJA RATE
-# =========================================
-
-def get_ibja_rate():
+def get_comex_gold_data():
 
     headers = {
         "User-Agent": "Mozilla/5.0"
     }
 
     response = requests.get(
-        "https://ibjarates.com/",
+        "https://comexlive.org/",
         headers=headers,
         timeout=20
     )
@@ -174,220 +169,115 @@ def get_ibja_rate():
 
     rows = soup.find_all("tr")
 
-    rates = {}
-
     for row in rows:
 
-        cols = row.find_all("td")
+        text = row.get_text(" ", strip=True)
 
-        if len(cols) >= 2:
+        if "COMEX Gold" in text:
 
-            label = cols[0].get_text(strip=True)
+            cols = row.find_all("td")
 
-            value = (
-                cols[1]
-                .get_text(strip=True)
-                .replace(",", "")
-            )
+            if len(cols) >= 6:
 
-            try:
-                rates[label] = float(value)
-            except:
-                pass
+                last_price = cols[1].get_text(strip=True)
+                change = cols[2].get_text(strip=True)
+                change_pct = cols[3].get_text(strip=True)
 
-    gold_22k_10g = rates.get("Gold 916", 0)
+                return {
+                    "price": last_price,
+                    "change": change,
+                    "change_pct": change_pct
+                }
 
-    if gold_22k_10g == 0:
-        raise Exception("Unable to fetch IBJA Gold Rate")
+    raise Exception("Unable to fetch COMEX Gold data")
 
-    return {
-        "gold_22k_10g": gold_22k_10g,
-        "gold_22k_1g": round(gold_22k_10g / 10, 2)
-    }
+# ==========================================
+# PREDICTION LOGIC
+# ==========================================
 
-# =========================================
-# GOLD API DATA
-# =========================================
+def analyze_market(change_percent):
 
-def get_gold_api_data():
-
-    headers = {
-        "x-access-token": GOLD_API_KEY,
-        "Content-Type": "application/json"
-    }
-
-    response = requests.get(
-        "https://www.goldapi.io/api/XAU/USD",
-        headers=headers,
-        timeout=20
+    pct = float(
+        change_percent
+        .replace("%", "")
+        .replace("+", "")
     )
 
-    response.raise_for_status()
+    if pct <= -1.5:
 
-    data = response.json()
+        sentiment = "🔴 Strong Bearish"
 
-    return {
-        "price": data.get("price", 0),
-        "change_percent": data.get("chp", 0),
-        "change_price": data.get("chg", 0)
-    }
-
-# =========================================
-# HISTORY FUNCTIONS
-# =========================================
-
-def load_history():
-
-    try:
-
-        with open(HISTORY_FILE, "r") as file:
-            return json.load(file)
-
-    except:
-        return []
-
-def save_history(price):
-
-    history = load_history()
-
-    history.append({
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "price": price
-    })
-
-    history = history[-7:]
-
-    with open(HISTORY_FILE, "w") as file:
-        json.dump(history, file, indent=2)
-
-# =========================================
-# ANALYSIS
-# =========================================
-
-def analyze_trend(current_price, history, gold_api):
-
-    score = 0
-
-    reasons = []
-
-    yesterday_price = None
-
-    if history:
-        yesterday_price = history[-1]["price"]
-
-    # =====================================
-    # LOCAL PRICE MOVEMENT
-    # =====================================
-
-    local_change = 0
-    local_pct = 0
-
-    if yesterday_price:
-
-        local_change = current_price - yesterday_price
-
-        local_pct = (
-            local_change / yesterday_price
-        ) * 100
-
-        if local_change > 50:
-            score += 3
-            reasons.append("Strong local gold rise")
-
-        elif local_change > 20:
-            score += 2
-            reasons.append("Moderate local gold rise")
-
-        elif local_change > 0:
-            score += 1
-            reasons.append("Small local gold rise")
-
-        elif local_change < -50:
-            score -= 3
-            reasons.append("Strong local gold fall")
-
-        elif local_change < -20:
-            score -= 2
-            reasons.append("Moderate local gold fall")
-
-        elif local_change < 0:
-            score -= 1
-            reasons.append("Small local gold fall")
-
-    # =====================================
-    # INTERNATIONAL GOLD TREND
-    # =====================================
-
-    global_change_pct = gold_api["change_percent"]
-
-    if global_change_pct > 1:
-        score += 3
-        reasons.append("International gold strongly bullish")
-
-    elif global_change_pct > 0.3:
-        score += 2
-        reasons.append("International gold bullish")
-
-    elif global_change_pct < -1:
-        score -= 3
-        reasons.append("International gold strongly bearish")
-
-    elif global_change_pct < -0.3:
-        score -= 2
-        reasons.append("International gold bearish")
-
-    # =====================================
-    # MOMENTUM
-    # =====================================
-
-    if len(history) >= 3:
-
-        avg3 = (
-            sum(item["price"] for item in history[-3:])
-            / 3
+        prediction = (
+            "📉 Tomorrow Indian gold price "
+            "likely to DECREASE strongly"
         )
 
-        if current_price > avg3:
-            score += 1
-            reasons.append("Above 3-day average")
+        probability = "80%"
 
-        else:
-            score -= 1
-            reasons.append("Below 3-day average")
+    elif pct <= -0.5:
 
-    # =====================================
-    # FINAL TREND
-    # =====================================
+        sentiment = "🟠 Bearish"
 
-    confidence = min(abs(score) * 18, 95)
+        prediction = (
+            "⬇️ Tomorrow Indian gold price "
+            "may DECREASE"
+        )
 
-    if score >= 4:
-        prediction = "📈 Gold likely to INCREASE tomorrow"
+        probability = "65%"
 
-    elif score >= 1:
-        prediction = "⬆️ Gold slightly bullish tomorrow"
+    elif pct < 0:
 
-    elif score <= -4:
-        prediction = "📉 Gold likely to DECREASE tomorrow"
+        sentiment = "🟡 Slight Bearish"
 
-    elif score <= -1:
-        prediction = "⬇️ Gold slightly bearish tomorrow"
+        prediction = (
+            "↘️ Tomorrow Indian gold price "
+            "slightly bearish"
+        )
+
+        probability = "55%"
+
+    elif pct >= 1.5:
+
+        sentiment = "🟢 Strong Bullish"
+
+        prediction = (
+            "📈 Tomorrow Indian gold price "
+            "likely to INCREASE strongly"
+        )
+
+        probability = "80%"
+
+    elif pct >= 0.5:
+
+        sentiment = "🟢 Bullish"
+
+        prediction = (
+            "⬆️ Tomorrow Indian gold price "
+            "may INCREASE"
+        )
+
+        probability = "65%"
 
     else:
-        prediction = "➡️ Gold may remain stable tomorrow"
+
+        sentiment = "⚪ Neutral"
+
+        prediction = (
+            "➡️ Tomorrow Indian gold price "
+            "may stay STABLE"
+        )
+
+        probability = "50%"
 
     return {
+        "sentiment": sentiment,
         "prediction": prediction,
-        "confidence": confidence,
-        "score": score,
-        "local_change": local_change,
-        "local_pct": local_pct,
-        "reasons": reasons
+        "probability": probability
     }
 
-# =========================================
+# ==========================================
 # SEND EMAIL
-# =========================================
+# ==========================================
 
 def send_email(subject, body):
 
@@ -406,9 +296,9 @@ def send_email(subject, body):
 
         smtp.send_message(msg)
 
-# =========================================
+# ==========================================
 # MAIN
-# =========================================
+# ==========================================
 
 def main():
 
@@ -416,67 +306,34 @@ def main():
         "%d %b %Y, %I:%M %p"
     )
 
-    ibja = get_ibja_rate()
+    comex = get_comex_gold_data()
 
-    gold_api = get_gold_api_data()
-
-    history = load_history()
-
-    analysis = analyze_trend(
-        ibja["gold_22k_1g"],
-        history,
-        gold_api
+    analysis = analyze_market(
+        comex["change_pct"]
     )
-
-    reasons_text = "\n- ".join(
-        analysis["reasons"]
-    )
-
-    history_text = ""
-
-    for item in history[-3:]:
-
-        history_text += (
-            f"{item['date']} → "
-            f"₹{item['price']}\n"
-        )
 
     msg = f"""
-📊 GOLD MARKET ANALYSIS
+📊 GOLD MARKET ALERT
 {now}
 
 ======================================
-🥇 INDIAN GOLD RATE (IBJA)
+🌍 COMEX GOLD LIVE
 ======================================
 
-22K Gold (1g):
-₹{ibja['gold_22k_1g']}
-
-22K Gold (10g):
-₹{ibja['gold_22k_10g']}
-
-======================================
-🌍 INTERNATIONAL GOLD
-======================================
-
-GoldAPI Price:
-${gold_api['price']}
-
-Daily Change:
-{gold_api['change_percent']}%
-
-======================================
-📈 LOCAL MARKET MOVEMENT
-======================================
+Current Price:
+{comex['price']}
 
 Today's Change:
-₹{analysis['local_change']:+.2f}
+{comex['change']}
 
-Percentage:
-{analysis['local_pct']:+.2f}%
+Change Percentage:
+{comex['change_pct']}
 
-Trend Score:
-{analysis['score']}
+======================================
+📈 MARKET SENTIMENT
+======================================
+
+{analysis['sentiment']}
 
 ======================================
 🔮 TOMORROW PREDICTION
@@ -484,24 +341,15 @@ Trend Score:
 
 {analysis['prediction']}
 
-Confidence:
-{analysis['confidence']}%
-
-Reasons:
-- {reasons_text}
-
-======================================
-📅 LAST RECORDED PRICES
-======================================
-
-{history_text}
+Chance Probability:
+{analysis['probability']}
 
 ======================================
 ⚠️ DISCLAIMER
 ======================================
 
-Trend estimation only.
-Not financial advice.
+Prediction based on COMEX market trend.
+This is NOT financial advice.
 """
 
     print(msg)
@@ -511,9 +359,11 @@ Not financial advice.
         msg
     )
 
-    save_history(
-        ibja["gold_22k_1g"]
-    )
+# ==========================================
+# START
+# ==========================================
 
 if __name__ == "__main__":
     main()
+
+
