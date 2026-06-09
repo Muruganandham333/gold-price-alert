@@ -123,34 +123,4 @@ Percentage Change:
 
 ======================================
 📈 MARKET SENTIMENT
-======================================
-
-{analysis['sentiment']}
-
-======================================
-🔮 TOMORROW PREDICTION
-======================================
-
-{analysis['prediction']}
-
-Chance Probability:
-{analysis['probability']}
-
-======================================
-⚠️ DISCLAIMER
-======================================
-
-Prediction based on COMEX trend.
-
-This is NOT financial advice.
-"""
-
-    print(msg)
-    send_email(f"Gold Prediction Alert - {now}", msg)
-
-# ==========================================
-# START
-# ==========================================
-
-if __name__ == "__main__":
-    main()
+================================
