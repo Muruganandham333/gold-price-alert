@@ -1,4 +1,4 @@
-from requests_html import HTMLSession
+from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import smtplib
 from email.mime.text import MIMEText
@@ -14,15 +14,18 @@ GMAIL_PASS = os.environ['GMAIL_APP_PASSWORD']
 TO_EMAIL = os.environ['TO_EMAIL']
 
 # ==========================================
-# FETCH COMEX GOLD DATA
+# FETCH COMEX GOLD DATA (Playwright)
 # ==========================================
 
 def get_comex_gold_data():
-    session = HTMLSession()
-    response = session.get("https://comexlive.org/")
-    response.html.render(timeout=60)   # <-- render JS to bypass 403
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto("https://comexlive.org/", timeout=60000)
+        html = page.content()
+        browser.close()
 
-    soup = BeautifulSoup(response.html.html, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
     rows = soup.find_all("tr")
 
     for row in rows:
@@ -123,4 +126,34 @@ Percentage Change:
 
 ======================================
 📈 MARKET SENTIMENT
-================================
+======================================
+
+{analysis['sentiment']}
+
+======================================
+🔮 TOMORROW PREDICTION
+======================================
+
+{analysis['prediction']}
+
+Chance Probability:
+{analysis['probability']}
+
+======================================
+⚠️ DISCLAIMER
+======================================
+
+Prediction based on COMEX trend.
+
+This is NOT financial advice.
+"""
+
+    print(msg)
+    send_email(f"Gold Prediction Alert - {now}", msg)
+
+# ==========================================
+# START
+# ==========================================
+
+if __name__ == "__main__":
+    main()
