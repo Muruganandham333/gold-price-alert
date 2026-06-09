@@ -1,5 +1,4 @@
-from playwright.sync_api import sync_playwright
-from bs4 import BeautifulSoup
+import requests
 import smtplib
 from email.mime.text import MIMEText
 import os
@@ -12,41 +11,28 @@ from datetime import datetime
 GMAIL_USER = os.environ['GMAIL_USER']
 GMAIL_PASS = os.environ['GMAIL_APP_PASSWORD']
 TO_EMAIL = os.environ['TO_EMAIL']
+GOLDAPI_KEY = os.environ['GOLD_API_KEY']   # <-- Your GoldAPI.io key
 
 # ==========================================
-# FETCH COMEX GOLD DATA (Playwright)
+# FETCH GOLD DATA (GoldAPI.io)
 # ==========================================
 
-def get_comex_gold_data():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto("https://comexlive.org/", timeout=60000)
+def get_gold_data():
+    url = "https://www.goldapi.io/api/XAU/INR"
+    headers = {
+        "x-access-token": GOLDAPI_KEY,
+        "Content-Type": "application/json"
+    }
 
-        # Wait until the table with COMEX Gold appears
-        page.wait_for_selector("table tr", timeout=60000)
+    response = requests.get(url, headers=headers, timeout=30)
+    response.raise_for_status()
+    data = response.json()
 
-        html = page.content()
-        browser.close()
-
-    # Debug: print first 500 chars of HTML to see what was fetched
-    print("DEBUG HTML:", html[:500])
-
-    soup = BeautifulSoup(html, "html.parser")
-    rows = soup.find_all("tr")
-
-    for row in rows:
-        cols = row.find_all("td")
-        if len(cols) >= 4:
-            symbol = cols[0].get_text(strip=True)
-            if "COMEX Gold" in symbol:
-                return {
-                    "price": cols[1].get_text(strip=True),
-                    "change": cols[2].get_text(strip=True),
-                    "change_pct": cols[3].get_text(strip=True)
-                }
-
-    raise Exception("COMEX Gold row not found")
+    return {
+        "price": str(data["price"]),
+        "change": str(data["ch"]),
+        "change_pct": str(data["chp"]) + "%"
+    }
 
 # ==========================================
 # MARKET ANALYSIS
@@ -107,25 +93,25 @@ def send_email(subject, body):
 def main():
     now = datetime.now().strftime("%d %b %Y, %I:%M %p")
 
-    comex = get_comex_gold_data()
-    analysis = analyze_market(comex["change_pct"])
+    gold = get_gold_data()
+    analysis = analyze_market(gold["change_pct"])
 
     msg = f"""
 📊 GOLD MARKET ALERT
 {now}
 
 ======================================
-🌍 COMEX GOLD LIVE
+🌍 GOLDAPI.IO LIVE DATA
 ======================================
 
 Current Price:
-{comex['price']}
+{gold['price']} INR
 
 Today's Change:
-{comex['change']}
+{gold['change']} INR
 
 Percentage Change:
-{comex['change_pct']}
+{gold['change_pct']}
 
 ======================================
 📈 MARKET SENTIMENT
@@ -146,7 +132,7 @@ Chance Probability:
 ⚠️ DISCLAIMER
 ======================================
 
-Prediction based on COMEX trend.
+Prediction based on GoldAPI trend.
 
 This is NOT financial advice.
 """
