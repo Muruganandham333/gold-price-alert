@@ -34,6 +34,7 @@ jobs:
           TO_EMAIL:           ${{ secrets.TO_EMAIL }}
           WA_PHONE:           ${{ secrets.WA_PHONE }}
           WA_APIKEY:          ${{ secrets.WA_APIKEY }}
+          GOLD_API_KEY:       ${{ secrets.GOLD_API_KEY }}
         run: python gold_tracker.py
 
       - name: Save price for tomorrow
