@@ -3,7 +3,7 @@ name: Gold Price Alert
 on:
   schedule:
     # 11:30 PM IST = 18:00 UTC
-    - cron: '0 18 * * *'
+    - cron: '30 17 * * *'
   workflow_dispatch:
 
 permissions:
